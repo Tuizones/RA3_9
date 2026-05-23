@@ -45,6 +45,13 @@ TIPO_ABRE = "PARENTESE_ABRE"
 TIPO_FECHA = "PARENTESE_FECHA"
 TIPO_IDENT = "IDENTIFICADOR"
 TIPO_KEYWORD = "KEYWORD"
+TIPO_COMENTARIO = "COMENTARIO"
+
+# Delimitadores de comentário (Fase 3) — definidos pelo grupo.
+# Comentários podem ocorrer em linha inteira, no fim de linha, entre
+# expressões e também ocupar várias linhas. NÃO são aninhados.
+COMENTARIO_ABRE = "*{"
+COMENTARIO_FECHA = "}*"
 
 # Palavras reservadas — quando o estado `identificador` fechar um token,
 # verificamos se o valor está aqui; se estiver, vira KEYWORD em vez de IDENT.
@@ -323,9 +330,87 @@ def tokenizar_linha(linha: str, numero_linha: int = 1) -> list[Token]:
     return contexto["tokens"]
 
 
-def tokenizar_programa(linhas: list[str]) -> list[Token]:
-    """Tokeniza todas as linhas preservando a numeração de linha."""
+def tokenizar_programa(linhas: list[str], manter_comentarios: bool = False) -> list[Token]:
+    """Tokeniza todas as linhas preservando a numeração de linha.
+
+    Fase 3: comentários no formato ``*{ ... }*`` são removidos antes da
+    tokenização. Eles podem aparecer em qualquer posição (linha inteira,
+    fim de linha, no meio de uma expressão) e também atravessar várias
+    linhas. Aninhamento NÃO é suportado. Se ``manter_comentarios=True``
+    os tokens ``COMENTARIO`` são retornados ao final da lista (apenas
+    para inspeção/debug).
+    Levanta :class:`Erros` se um comentário ficar aberto até o EOF.
+    """
+    linhas_limpas, coments = _strip_comentarios(linhas)
     todos: list[Token] = []
-    for idx, linha in enumerate(linhas, start=1):
+    for idx, linha in enumerate(linhas_limpas, start=1):
         todos.extend(tokenizar_linha(linha, numero_linha=idx))
+    if manter_comentarios:
+        todos.extend(coments)
     return todos
+
+
+def _strip_comentarios(linhas: list[str]) -> tuple[list[str], list[Token]]:
+    """Remove comentários ``*{ ... }*`` substituindo o conteúdo por espaços.
+
+    Manter o tamanho original das linhas preserva colunas/linhas dos
+    tokens reais — importante para mensagens de erro do parser. Retorna
+    a lista de linhas limpas e os tokens de comentário coletados (com a
+    posição de abertura).
+    """
+    limpas: list[str] = []
+    coments: list[Token] = []
+    em_com = False
+    inicio_lin = 0
+    inicio_col = 0
+    buffer = ""
+
+    for nlin, linha in enumerate(linhas, start=1):
+        saida: list[str] = []
+        i = 0
+        n = len(linha)
+        while i < n:
+            ch = linha[i]
+            prox = linha[i + 1] if i + 1 < n else ""
+            if not em_com:
+                if ch == "*" and prox == "{":
+                    em_com = True
+                    inicio_lin = nlin
+                    inicio_col = i + 1
+                    buffer = "*{"
+                    saida.append("  ")
+                    i += 2
+                    continue
+                saida.append(ch)
+                i += 1
+            else:
+                if ch == "}" and prox == "*":
+                    buffer += "}*"
+                    coments.append(
+                        Token(
+                            tipo=TIPO_COMENTARIO,
+                            valor=buffer,
+                            linha=inicio_lin,
+                            coluna=inicio_col,
+                        )
+                    )
+                    em_com = False
+                    buffer = ""
+                    saida.append("  ")
+                    i += 2
+                    continue
+                # dentro do comentário: descarta caractere preservando coluna
+                buffer += ch
+                saida.append(" ")
+                i += 1
+        if em_com:
+            # quebra de linha dentro do comentário — preserva no buffer
+            buffer += "\n"
+        limpas.append("".join(saida))
+
+    if em_com:
+        raise Erros(
+            f"Comentário não fechado iniciado na linha {inicio_lin}, "
+            f"coluna {inicio_col} (esperado '}}*' antes do fim do arquivo)"
+        )
+    return limpas, coments
