@@ -15,10 +15,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.lexer_fsm import (
     Erros,
+    TIPO_COMENTARIO,
     TIPO_IDENT,
     TIPO_KEYWORD,
     TIPO_OPERADOR,
     tokenizar_linha,
+    tokenizar_programa,
 )
 
 
@@ -107,6 +109,62 @@ class TestLexerFase2(unittest.TestCase):
     def test_identificador_com_minuscula(self):
         with self.assertRaises(Erros):
             tokenizar_linha("(Mem)")
+
+
+class TestLexerComentarios(unittest.TestCase):
+    """Fase 3 §1 — suporte a comentários ``*{ ... }*``."""
+
+    def test_comentario_linha_inteira_eh_ignorado(self):
+        linhas = ["*{ apenas um comentario }*", "(START)", "(1 2 +)", "(END)"]
+        toks = tokenizar_programa(linhas)
+        valores = [t.valor for t in toks]
+        self.assertNotIn("*{", valores)
+        self.assertEqual(valores[:3], ["(", "START", ")"])
+
+    def test_comentario_meio_de_expressao(self):
+        toks = tokenizar_programa(["(1 *{ nota }* 2 +)"])
+        self.assertEqual([t.valor for t in toks], ["(", "1", "2", "+", ")"])
+
+    def test_comentario_fim_de_linha(self):
+        toks = tokenizar_programa(["(1 2 +) *{ resultado 3 }*"])
+        self.assertEqual([t.valor for t in toks], ["(", "1", "2", "+", ")"])
+
+    def test_comentario_multilinha(self):
+        linhas = [
+            "(START)",
+            "*{ este comentario",
+            "ocupa varias",
+            "linhas }*",
+            "(1 2 +)",
+            "(END)",
+        ]
+        toks = tokenizar_programa(linhas)
+        valores = [t.valor for t in toks]
+        self.assertEqual(
+            valores,
+            ["(", "START", ")", "(", "1", "2", "+", ")", "(", "END", ")"],
+        )
+
+    def test_comentario_preserva_numero_de_linha_dos_tokens(self):
+        linhas = [
+            "(START)",
+            "*{ comentario }*",
+            "(1 2 +)",
+        ]
+        toks = tokenizar_programa(linhas)
+        token_um = next(t for t in toks if t.valor == "1")
+        self.assertEqual(token_um.linha, 3)
+
+    def test_comentario_nao_fechado_eh_erro(self):
+        with self.assertRaises(Erros) as ctx:
+            tokenizar_programa(["(START)", "*{ sem fechamento", "(1 2 +)"])
+        self.assertIn("não fechado", str(ctx.exception))
+
+    def test_manter_comentarios_devolve_tokens_comentario(self):
+        toks = tokenizar_programa(["(1 *{ nota }* 2 +)"], manter_comentarios=True)
+        comentarios = [t for t in toks if t.tipo == TIPO_COMENTARIO]
+        self.assertEqual(len(comentarios), 1)
+        self.assertEqual(comentarios[0].valor, "*{ nota }*")
 
 
 if __name__ == "__main__":
