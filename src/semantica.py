@@ -215,3 +215,112 @@ def inferir_tipo(no: dict | None, tabela: TabelaSimbolos) -> str:
 # --------------------------------------------------------------
 
 
+def construirTabelaSimbolos(arvore: dict) -> tuple[TabelaSimbolos, list[ErroSemantico]]:
+    """Percorre a AST do programa e devolve ``(tabela, erros)``.
+
+    O percurso é pré-ordem; para ``mem_write`` registramos a declaração
+    ANTES de descer no valor (uma definição numa expressão imbricada
+    passa a valer a partir daquele ponto). Para ``mem_read`` registramos
+    o uso. Para ``res_ref`` validamos o N contra o índice do statement
+    de topo atual.
+    """
+    tabela = TabelaSimbolos()
+    erros: list[ErroSemantico] = []
+    if not arvore or arvore.get("tipo") != "program":
+        return tabela, erros
+
+    stmts: list[dict] = arvore.get("stmts", [])
+
+    def visitar(no: dict | None, idx_stmt_topo: int) -> None:
+        if not isinstance(no, dict):
+            return
+        tipo = no.get("tipo")
+        linha = no.get("linha", 0) or 0
+
+        if tipo == "mem_write":
+            # primeiro descemos no valor (ele não pode usar a própria
+            # MEM antes de ela existir — mas pode usar OUTRAS MEMs já
+            # declaradas anteriormente)
+            visitar(no.get("valor"), idx_stmt_topo)
+            tipo_inferido = inferir_tipo(no.get("valor"), tabela)
+            erros.extend(tabela.declarar(no.get("nome", ""), tipo_inferido, linha))
+            return
+
+        if tipo == "mem_read":
+            _, errs = tabela.usar(no.get("nome", ""), linha)
+            erros.extend(errs)
+            return
+
+        if tipo == "res_ref":
+            n = no.get("linhas_atras", 0)
+            if n > idx_stmt_topo:
+                erros.append(
+                    ErroSemantico(
+                        f"(N RES) referencia {n} linhas atrás, mas só existem "
+                        f"{idx_stmt_topo} statement(s) anterior(es)",
+                        linha,
+                    )
+                )
+            return
+
+        if tipo == "binary":
+            visitar(no.get("esq"), idx_stmt_topo)
+            visitar(no.get("dir"), idx_stmt_topo)
+            return
+
+        if tipo == "if":
+            visitar(no.get("cond"), idx_stmt_topo)
+            visitar(no.get("then_block"), idx_stmt_topo)
+            return
+
+        if tipo == "ifelse":
+            visitar(no.get("cond"), idx_stmt_topo)
+            visitar(no.get("then_block"), idx_stmt_topo)
+            visitar(no.get("else_block"), idx_stmt_topo)
+            return
+
+        if tipo == "while":
+            visitar(no.get("cond"), idx_stmt_topo)
+            visitar(no.get("body"), idx_stmt_topo)
+            return
+
+        # number, ident, keyword: folhas sem efeito sobre a tabela
+
+    for i, stmt in enumerate(stmts):
+        # idx_stmt_topo = i  → quantos statements existem ANTES deste
+        visitar(stmt, i)
+
+    return tabela, erros
+
+
+# --------------------------------------------------------------
+# Renderização: tabela em Markdown
+# --------------------------------------------------------------
+
+
+def formatarTabelaMarkdown(tabela: TabelaSimbolos) -> str:
+    """Devolve uma representação Markdown da tabela de símbolos."""
+    linhas: list[str] = []
+    linhas.append("# Tabela de Símbolos\n")
+    if len(tabela) == 0:
+        linhas.append("_Nenhuma variável MEM declarada._\n")
+        return "\n".join(linhas)
+    linhas.append("| Nome | Tipo | Escopo | Linha def. | Linhas de uso |")
+    linhas.append("|------|------|--------|-----------:|---------------|")
+    for sim in tabela.itens():
+        usos = ", ".join(str(u) for u in sim["linhas_uso"]) or "—"
+        linhas.append(
+            f"| `{sim['nome']}` | {sim['tipo']} | {sim['escopo']} | "
+            f"{sim['linha_def']} | {usos} |"
+        )
+    return "\n".join(linhas) + "\n"
+
+
+def salvarTabelaSimbolos(
+    tabela: TabelaSimbolos, caminho: str | Path = "output/tabela_simbolos.md"
+) -> Path:
+    p = Path(caminho)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(formatarTabelaMarkdown(tabela), encoding="utf-8")
+    return p
+
