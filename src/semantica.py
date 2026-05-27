@@ -152,3 +152,66 @@ class TabelaSimbolos:
         return len(self._tab)
 
 
+# --------------------------------------------------------------
+# Inferência de tipos (versão leve da Sprint 2)
+# --------------------------------------------------------------
+
+
+def _tipo_de_numero(valor: str) -> str:
+    return TIPO_REAL if "." in valor else TIPO_INT
+
+
+def inferir_tipo(no: dict | None, tabela: TabelaSimbolos) -> str:
+    """Inferência de tipo *best-effort* a partir da AST.
+
+    Esta versão é minimalista; a Sprint 4 (verificarTipos) fará a
+    verificação completa com erros e promoções. Aqui basta o suficiente
+    para registrar o tipo declarado nas variáveis MEM.
+    """
+    if no is None:
+        return TIPO_INDEF
+    tipo = no.get("tipo")
+    if tipo == "number":
+        return _tipo_de_numero(no.get("valor", ""))
+    if tipo == "binary":
+        op = no.get("op", "")
+        if op in _OPS_RELACIONAIS:
+            return TIPO_BOOL
+        if op in _OPS_REAL:
+            return TIPO_REAL
+        if op in _OPS_INT:
+            return TIPO_INT
+        # +, -, *, ^  → herdamos o tipo dos operandos (regra simples)
+        t_esq = inferir_tipo(no.get("esq"), tabela)
+        t_dir = inferir_tipo(no.get("dir"), tabela)
+        if t_esq == t_dir and t_esq in (TIPO_INT, TIPO_REAL):
+            return t_esq
+        if TIPO_REAL in (t_esq, t_dir):
+            return TIPO_REAL
+        if TIPO_INT in (t_esq, t_dir):
+            return TIPO_INT
+        return TIPO_INDEF
+    if tipo == "mem_read":
+        sim = tabela.obter(no.get("nome", ""))
+        return sim["tipo"] if sim else TIPO_INDEF
+    if tipo == "mem_write":
+        # uma escrita não devolve valor utilizável aqui
+        return TIPO_INDEF
+    if tipo == "res_ref":
+        return TIPO_INDEF  # depende do statement referenciado
+    if tipo == "if":
+        return inferir_tipo(no.get("then_block"), tabela)
+    if tipo == "ifelse":
+        t1 = inferir_tipo(no.get("then_block"), tabela)
+        t2 = inferir_tipo(no.get("else_block"), tabela)
+        return t1 if t1 == t2 else TIPO_INDEF
+    if tipo == "while":
+        return TIPO_INDEF
+    return TIPO_INDEF
+
+
+# --------------------------------------------------------------
+# Construção da tabela a partir da AST
+# --------------------------------------------------------------
+
+
