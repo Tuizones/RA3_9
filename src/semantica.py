@@ -70,3 +70,85 @@ class ErroSemantico:
         return prefixo + self.mensagem
 
 
+# --------------------------------------------------------------
+# Tabela de símbolos
+# --------------------------------------------------------------
+
+
+class TabelaSimbolos:
+    """Tabela de símbolos do programa (escopo único: ``global``).
+
+    Cada entrada é um ``dict`` com as chaves:
+      ``nome``        — identificador da variável MEM;
+      ``tipo``        — tipo inferido na primeira declaração;
+      ``linha_def``   — linha da primeira ``(v MEM)``;
+      ``linhas_uso``  — lista de linhas onde ``(MEM)`` aparece;
+      ``escopo``      — sempre ``"global"`` nesta linguagem.
+    """
+
+    def __init__(self) -> None:
+        self._tab: dict[str, dict] = {}
+
+    # ---- operações principais -----------------------------------
+
+    def declarar(self, nome: str, tipo: str, linha: int) -> list[ErroSemantico]:
+        """Registra ``(v MEM)``. Devolve lista de erros (vazia se ok)."""
+        erros: list[ErroSemantico] = []
+        if nome in self._tab:
+            existente = self._tab[nome]
+            tipo_atual = existente["tipo"]
+            if tipo_atual == TIPO_INDEF and tipo != TIPO_INDEF:
+                # promove de indef para o tipo concreto
+                existente["tipo"] = tipo
+            elif tipo == TIPO_INDEF:
+                # nada a fazer: mantém o tipo conhecido
+                pass
+            elif tipo_atual != tipo:
+                erros.append(
+                    ErroSemantico(
+                        f"redeclaração da variável '{nome}' com tipo "
+                        f"incompatível: era '{tipo_atual}', recebeu '{tipo}'",
+                        linha,
+                    )
+                )
+            # mesmo se houver erro, registramos a linha como uma "nova def"
+            # para que análises subsequentes funcionem
+            return erros
+        self._tab[nome] = {
+            "nome": nome,
+            "tipo": tipo,
+            "linha_def": linha,
+            "linhas_uso": [],
+            "escopo": "global",
+        }
+        return erros
+
+    def usar(self, nome: str, linha: int) -> tuple[dict | None, list[ErroSemantico]]:
+        """Registra ``(MEM)``. Devolve (símbolo|None, erros)."""
+        if nome not in self._tab:
+            return None, [
+                ErroSemantico(
+                    f"uso da variável '{nome}' antes da declaração (faltou '(v MEM)')",
+                    linha,
+                )
+            ]
+        sim = self._tab[nome]
+        if linha and linha not in sim["linhas_uso"]:
+            sim["linhas_uso"].append(linha)
+        return sim, []
+
+    # ---- acesso somente-leitura ---------------------------------
+
+    def obter(self, nome: str) -> dict | None:
+        return self._tab.get(nome)
+
+    def itens(self) -> list[dict]:
+        return [self._tab[n] for n in sorted(self._tab)]
+
+    def __contains__(self, nome: str) -> bool:  # pragma: no cover - trivial
+        return nome in self._tab
+
+    def __len__(self) -> int:  # pragma: no cover - trivial
+        return len(self._tab)
+
+
