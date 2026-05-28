@@ -162,19 +162,34 @@ def _emit_binario(no: dict, linhas: list[str], ctx: dict) -> None:
 
     op = no["op"]
 
-    if op == "+":
+    # Dispatch tipado (Etapa 5): se o nó foi anotado por
+    # gerarArvoreAtribuida e ambos os operandos são `int`, emitimos
+    # instruções ARM inteiras (ADD/SUB/MUL/CMP+MOV). Caso contrário,
+    # mantemos o caminho VFP (F64) usado historicamente pela Fase 2.
+    if _eh_int_puro(no) and op in ("+", "-", "*"):
+        _emit_arith_int(op, linhas)
+    elif _eh_int_puro(no) and op in (">", "<", "==", "!=", ">=", "<="):
+        _emit_comparacao_int(op, linhas, ctx)
+    elif op == "+":
+        linhas.append("    @ tipo=real +  → VADD.F64")
         linhas.append("    VADD.F64 d0, d0, d1")
     elif op == "-":
+        linhas.append("    @ tipo=real -  → VSUB.F64")
         linhas.append("    VSUB.F64 d0, d0, d1")
     elif op == "*":
+        linhas.append("    @ tipo=real *  → VMUL.F64")
         linhas.append("    VMUL.F64 d0, d0, d1")
     elif op == "|":
+        linhas.append("    @ divisão real → VDIV.F64")
         linhas.append("    VDIV.F64 d0, d0, d1")  # divisão real
     elif op == "/":
+        linhas.append("    @ divisão inteira → BL __op_idiv")
         linhas.append("    BL __op_idiv")         # divisão inteira
     elif op == "%":
+        linhas.append("    @ módulo inteiro → BL __op_mod")
         linhas.append("    BL __op_mod")
     elif op == "^":
+        linhas.append("    @ potência (expoente int) → BL __op_pow")
         linhas.append("    BL __op_pow")
     elif op in (">", "<", "==", "!=", ">=", "<="):
         _emit_comparacao(op, linhas, ctx)
@@ -182,6 +197,61 @@ def _emit_binario(no: dict, linhas: list[str], ctx: dict) -> None:
         raise ValueError(f"Operador não suportado: {op}")
 
     _emit_push_d0(linhas)
+
+
+def _eh_int_puro(no: dict) -> bool:
+    """Verifica se um nó binário deve usar o caminho ARM inteiro.
+
+    True quando *ambos* os operandos têm ``tipo_inferido == "int"``. A
+    ausência da anotação faz o teste retornar False — assim a geração
+    de código sobre ASTs não-tipadas (testes da Fase 2) continua usando
+    o caminho VFP histórico.
+    """
+    esq = no.get("esq") or {}
+    dir_ = no.get("dir") or {}
+    return (
+        esq.get("tipo_inferido") == "int"
+        and dir_.get("tipo_inferido") == "int"
+    )
+
+
+def _emit_arith_int(op: str, linhas: list[str]) -> None:
+    """Emite ADD/SUB/MUL inteiro convertendo d0/d1 em r0/r1.
+
+    Mantemos a pilha de operandos como F64 para compatibilidade com o
+    restante do gerador. Converter no operador é simples e correto
+    porque a análise de tipos já garantiu que os valores cabem em int32.
+    """
+    instr = {"+": "ADD", "-": "SUB", "*": "MUL"}[op]
+    linhas.append(f"    @ tipo=int {op} → {instr} (ARM inteiro)")
+    linhas.append("    VCVT.S32.F64 s0, d0")
+    linhas.append("    VCVT.S32.F64 s2, d1")
+    linhas.append("    VMOV r0, s0")
+    linhas.append("    VMOV r1, s2")
+    linhas.append(f"    {instr} r0, r0, r1")
+    linhas.append("    VMOV s0, r0")
+    linhas.append("    VCVT.F64.S32 d0, s0")
+
+
+def _emit_comparacao_int(op: str, linhas: list[str], ctx: dict) -> None:
+    """Comparação relacional ARM inteira (CMP + MOVcc), resultado 0/1.
+
+    O resultado bool é devolvido como 0.0 ou 1.0 em ``d0`` (mesma
+    convenção da comparação F64) para que IF/WHILE/IFELSE continuem
+    testando contra ``const_zero``.
+    """
+    cc = {">": "GT", "<": "LT", ">=": "GE", "<=": "LE", "==": "EQ", "!=": "NE"}[op]
+    linhas.append(f"    @ tipo=bool ({op} int) → CMP + MOV{cc}")
+    linhas.append("    VCVT.S32.F64 s0, d0")
+    linhas.append("    VCVT.S32.F64 s2, d1")
+    linhas.append("    VMOV r0, s0")
+    linhas.append("    VMOV r1, s2")
+    linhas.append("    CMP r0, r1")
+    linhas.append("    MOV r0, #0")
+    linhas.append(f"    MOV{cc} r0, #1")
+    # promove o bool a F64 0.0/1.0 para a pilha unificada
+    linhas.append("    VMOV s0, r0")
+    linhas.append("    VCVT.F64.S32 d0, s0")
 
 
 def _emit_comparacao(op: str, linhas: list[str], ctx: dict) -> None:
@@ -289,6 +359,42 @@ def _emit_while(no: dict, linhas: list[str], ctx: dict) -> None:
 
 
 # -------------------- Geração do programa final --------------------
+
+
+def gerar_assembly_de_arvore_atribuida(arvore_atribuida: dict) -> str:
+    """Wrapper para Etapa 5: gera Assembly a partir da árvore atribuída.
+
+    Adiciona um cabeçalho documentando os tipos inferidos por statement
+    (Etapa 3) e então delega a :func:`gerar_assembly_arvore`. A geração
+    real continua sendo a mesma função — mas como os nós já vêm com
+    ``tipo_inferido`` anotado, o dispatch tipado em ``_emit_binario``
+    (instruções ARM inteiras x VFP) entra em ação automaticamente.
+
+    Esta é a função que o ``AnalisadorSemantico.py`` deve chamar quando
+    NÃO houver erros léxicos/sintáticos/semânticos. A política de
+    "não gera Assembly quando há erro" é responsabilidade do orquestrador
+    (não desta função): aqui assumimos uma árvore válida e atribuída.
+    """
+    if not arvore_atribuida or arvore_atribuida.get("tipo") != "program":
+        raise ValueError("gerar_assembly_de_arvore_atribuida: AST inválida")
+
+    cabecalho: list[str] = ["@ ====================================================="]
+    cabecalho.append("@  Assembly gerado a partir da ÁRVORE SINTÁTICA ATRIBUÍDA")
+    cabecalho.append("@  (Fase 3 — Etapa 5)")
+    cabecalho.append("@  Tipos inferidos por statement de topo:")
+    for i, stmt in enumerate(arvore_atribuida.get("stmts", []), 1):
+        ti = stmt.get("tipo_inferido", "—")
+        cabecalho.append(f"@    stmt #{i}: {ti}")
+    cabecalho.append("@ =====================================================")
+    cabecalho.append("")
+
+    corpo = gerar_assembly_arvore(arvore_atribuida)
+    return "\n".join(cabecalho) + corpo
+
+
+# Encaminha para a função que opera sobre a árvore atribuída.
+def gerarAssembly(arvore_atribuida: dict) -> str:
+    return gerar_assembly_de_arvore_atribuida(arvore_atribuida)
 
 
 def gerar_assembly_arvore(arvore_programa: dict) -> str:
