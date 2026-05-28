@@ -1,33 +1,31 @@
-# Teste 1 — Operações aritméticas, comandos especiais e estruturas de controle.
-# Usa todas as operações (+ - * | / % ^) e os três comandos especiais
-# ((N RES), (V MEM), (MEM)), além de um IF e um WHILE.
+*{ Teste 1 — Cobertura completa de operadores e comandos especiais. }*
+*{ Cobre todos os operadores (+ - * | / % ^), os três comandos especiais }*
+*{ ((N RES), (V MEM), (MEM)) e os três tipos (int, real, bool). }*
+*{ Cada operação respeita a regra de tipo homogêneo (sem promoção). }*
+
 (START)
-# resultado: 13
+*{ soma inteira → 13 }*
 (10 3 +)
-# resultado: 5.0
-(7.5 2.5 -)
-# resultado: 10.0
-(4 2.5 *)
-# resultado: 2.5  (divisão real)
-(10.0 4.0 |)
-# resultado: 3  (divisão inteira)
-(10 3 /)
-# resultado: 1  (resto)
+*{ subtração inteira → 5 }*
+(8 3 -)
+*{ multiplicação inteira → 12 }*
+(4 3 *)
+*{ divisão inteira → 5 (operandos int) }*
+(10 *{ dividendo }* 2 /)
+*{ resto inteiro → 1 }*
 (10 3 %)
-# resultado: 32
+*{ potência int^int → 32 }*
 (2 5 ^)
-# armazena VARA = 20, resultado: 20
-(20 VARA)
-# resultado: 10.0  (VARA / 2 real)
-((VARA) 2 |)
-# resultado: 20  (resultado_7 = stmt (20 VARA))
-(2 RES)
-# WHILE: VARA decrementa 10 por iteração (20 → 10 → 0), sai quando VARA <= 0, resultado neutro: 0.0
-(((VARA) 0 >) (((VARA) 10 -) VARA) WHILE)
-# VARA = 0 após o WHILE → 0 >= 5 é FALSO → FLAG = 0, resultado: 0.0
-(((VARA) 5 >=) (1 FLAG) (0 FLAG) IFELSE)
-# FLAG = 0, logo 0 == 0 → VERDADEIRO, resultado: 1.0
-((FLAG) 0 ==)
-# resultado: 5  (13 - 8)
-((10 3 +) (2 4 *) -)
+*{ bloco real coexistindo no mesmo arquivo — cobre o operador | }*
+(7.5 2.5 |)             *{ divisão real → 3.0 (comentario no fim da linha) }*
+*{ memoria CONT recebe inteiro 5 }*
+(5 CONT)
+*{ leitura de memoria + multiplicação inteira → 10 }*
+((CONT) 2 *) *{ comentário no fim da linha }*
+*{ (N RES): referencia o stmt anterior (int) → 10 }*
+(1 RES)
+*{ WHILE: decrementa CONT enquanto positivo (cond bool, corpo int) }*
+(((CONT) 0 >) (((CONT) 1 -) CONT) WHILE)
+*{ IF: condição bool (CONT == 0) → executa corpo int }*
+(((CONT) 0 ==) (42 RESULT) IF)
 (END)
