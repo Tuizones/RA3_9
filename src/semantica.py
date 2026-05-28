@@ -324,3 +324,431 @@ def salvarTabelaSimbolos(
     p.write_text(formatarTabelaMarkdown(tabela), encoding="utf-8")
     return p
 
+
+# --------------------------------------------------------------
+# Verificação de Tipos (Sprint 3 / §4 do guia)
+# --------------------------------------------------------------
+
+# Regras formais (cálculo de sequentes) — ver `regras_tipos.md`.
+# Sumário (Γ = ambiente da tabela de símbolos):
+#
+#   • literal sem ponto         → int
+#   • literal com ponto         → real
+#   • (e1 e2 op),  op ∈ {+,-,*,^}  exige  e1:τ, e2:τ, τ ∈ {int, real}  → τ
+#   • (e1 e2 /),  (e1 e2 %)      exige  e1:int, e2:int                  → int
+#   • (e1 e2 |)                  exige  e1:real, e2:real                → real
+#   • (e1 e2 ⊳),  ⊳ ∈ {>,<,==,!=,>=,<=}  exige  e1:τ, e2:τ, τ numérico  → bool
+#   • (cond block IF)            exige  cond:bool                       → τ(block)
+#   • (cond t e IFELSE)          exige  cond:bool ∧ τ(t) = τ(e)         → τ(t)
+#   • (cond body WHILE)          exige  cond:bool                       → unit
+#   • (v MEM)                    declara MEM:τ(v)                       (Γ' = Γ, MEM:τ(v))
+#   • (MEM)                      exige  MEM ∈ Γ                         → τ(MEM)
+#
+# Política sobre tipos numéricos: NÃO há promoção implícita int→real.
+#   `(1 2.5 +)` é erro semântico. Justificativa: o gerador ARMv7 escolhe
+#   instruções diferentes para int (ADD) e real (VADD.F64); manter os
+#   tipos disjuntos simplifica a geração de código e respeita a regra
+#   "tipo da variável fixado no momento da definição" (§2.3).
+# Tipos indefinidos (TIPO_INDEF) são tratados como "joker": não geram
+# erros em cascata (o erro original já foi reportado pela TabelaSimbolos).
+
+
+def _emitir(erros: list[ErroSemantico], msg: str, linha: int) -> None:
+    erros.append(ErroSemantico(msg, linha))
+
+
+def verificarTipos(
+    arvore: dict, tabela: TabelaSimbolos
+) -> tuple[dict, list[ErroSemantico]]:
+    """Aplica as regras de tipos sobre a AST e devolve ``(arvore, erros)``.
+
+    A árvore recebida é mutada in-place: cada nó relevante recebe a
+    chave ``tipo_inferido``. Os erros são acumulados em lista (sem
+    abortar no primeiro), seguindo o estilo de recuperação adotado em
+    todo o projeto.
+    """
+    erros: list[ErroSemantico] = []
+    if not arvore or arvore.get("tipo") != "program":
+        return arvore, erros
+
+    stmts_tipados: list[dict] = []  # contexto para resolução de (N RES)
+
+    def tipar(no) -> str:
+        if not isinstance(no, dict):
+            return TIPO_INDEF
+        t = no.get("tipo")
+        linha = no.get("linha", 0) or 0
+
+        if t == "number":
+            ti = _tipo_de_numero(no.get("valor", ""))
+        elif t == "mem_read":
+            sim = tabela.obter(no.get("nome", ""))
+            ti = sim["tipo"] if sim else TIPO_INDEF
+        elif t == "res_ref":
+            # Tipo de (N RES) = tipo do statement N posições antes do atual.
+            n = no.get("linhas_atras", 0) or 0
+            if 1 <= n <= len(stmts_tipados):
+                ti = stmts_tipados[-n].get("tipo_inferido", TIPO_INDEF)
+            else:
+                ti = TIPO_INDEF
+        elif t == "mem_write":
+            # mem_write propaga o tipo do valor escrito (T-MemDef/T-MemSet).
+            ti = tipar(no.get("valor"))
+        elif t == "binary":
+            ti = _tipar_binario(no, tipar, erros)
+        elif t == "if":
+            tc = tipar(no.get("cond"))
+            tb = tipar(no.get("then_block"))
+            if tc not in (TIPO_BOOL, TIPO_INDEF):
+                _emitir(erros, f"condição do IF deve ser 'bool', recebeu '{tc}'", linha)
+            ti = tb
+        elif t == "ifelse":
+            tc = tipar(no.get("cond"))
+            tt = tipar(no.get("then_block"))
+            te = tipar(no.get("else_block"))
+            if tc not in (TIPO_BOOL, TIPO_INDEF):
+                _emitir(erros, f"condição do IFELSE deve ser 'bool', recebeu '{tc}'", linha)
+            if tt == te:
+                ti = tt
+            elif TIPO_INDEF in (tt, te):
+                ti = tt if tt != TIPO_INDEF else te
+            else:
+                _emitir(
+                    erros,
+                    f"ramos do IFELSE têm tipos divergentes: 'then':{tt} vs 'else':{te}",
+                    linha,
+                )
+                ti = TIPO_INDEF
+        elif t == "while":
+            tc = tipar(no.get("cond"))
+            tipar(no.get("body"))
+            if tc not in (TIPO_BOOL, TIPO_INDEF):
+                _emitir(erros, f"condição do WHILE deve ser 'bool', recebeu '{tc}'", linha)
+            ti = TIPO_INDEF
+        else:
+            ti = TIPO_INDEF
+
+        no["tipo_inferido"] = ti
+        return ti
+
+    for stmt in arvore.get("stmts", []):
+        tipar(stmt)
+        stmts_tipados.append(stmt)
+    return arvore, erros
+
+
+def _tipar_binario(no: dict, tipar, erros: list[ErroSemantico]) -> str:
+    op = no.get("op", "")
+    linha = no.get("linha", 0) or 0
+    te = tipar(no.get("esq"))
+    td = tipar(no.get("dir"))
+
+    numericos = {TIPO_INT, TIPO_REAL}
+
+    if op in _OPS_RELACIONAIS:
+        if TIPO_INDEF in (te, td):
+            return TIPO_BOOL
+        if te == td and te in numericos:
+            return TIPO_BOOL
+        _emitir(
+            erros,
+            f"operador relacional '{op}' exige operandos numéricos do mesmo tipo, "
+            f"recebeu '{te}' e '{td}'",
+            linha,
+        )
+        return TIPO_BOOL
+
+    if op == "|":
+        if TIPO_INDEF in (te, td):
+            return TIPO_REAL
+        if te == TIPO_REAL and td == TIPO_REAL:
+            return TIPO_REAL
+        _emitir(
+            erros,
+            f"operador '|' (divisão real) exige operandos 'real', recebeu '{te}' e '{td}'",
+            linha,
+        )
+        return TIPO_REAL
+
+    if op in _OPS_INT:
+        if TIPO_INDEF in (te, td):
+            return TIPO_INT
+        if te == TIPO_INT and td == TIPO_INT:
+            return TIPO_INT
+        _emitir(
+            erros,
+            f"operador '{op}' exige operandos 'int', recebeu '{te}' e '{td}'",
+            linha,
+        )
+        return TIPO_INT
+
+    # operadores que aceitam int OU real (homogêneo): + - * ^
+    if TIPO_INDEF in (te, td):
+        # propaga o tipo conhecido (se houver) — evita avalanche
+        if te in numericos:
+            return te
+        if td in numericos:
+            return td
+        return TIPO_INDEF
+    if te == td and te in numericos:
+        return te
+    _emit(
+        erros,
+        f"operador '{op}' exige operandos numéricos do mesmo tipo (sem promoção implícita), "
+        f"recebeu '{te}' e '{td}'",
+        linha,
+    )
+    return TIPO_INDEF
+
+
+def _emit(erros: list[ErroSemantico], msg: str, linha: int) -> None:  # pragma: no cover - alias
+    _emitir(erros, msg, linha)
+
+
+# --------------------------------------------------------------
+# Árvore Sintática Atribuída (Etapa 4 / §5 do guia)
+# --------------------------------------------------------------
+
+# A "árvore atribuída" é a AST original enriquecida com:
+#   • ``tipo_inferido``   — já posto por verificarTipos (Etapa 3);
+#   • ``meta_asm``        — metadados para a fase de geração de código
+#                           (registrador alvo sugerido e, para nós de
+#                           controle, os rótulos que serão usados);
+#   • ``simbolo_ref``     — em nós ``mem_read``/``mem_write``: cópia
+#                           dos campos relevantes da entrada da
+#                           TabelaSimbolos (não usamos uma referência
+#                           direta para que a árvore continue serializável
+#                           em JSON sem ciclos).
+#
+# Não duplicamos nós — anotamos in-place (mesma estratégia de
+# verificarTipos). Quem quiser preservar a árvore "crua" deve copiar
+# antes via ``copy.deepcopy``.
+
+
+# Mapa tipo_inferido → registrador sugerido para o gerador.
+_REG_ALVO = {
+    TIPO_INT: "R0",
+    TIPO_BOOL: "R0",   # bool fica em registrador inteiro (0/1)
+    TIPO_REAL: "D0",
+    TIPO_INDEF: "D0",  # fallback conservador: dobro
+}
+
+
+def _meta_asm_base(no: dict, ctx: dict) -> dict:
+    tipo = no.get("tipo_inferido", TIPO_INDEF)
+    meta: dict = {"registrador": _REG_ALVO.get(tipo, "D0"), "tipo": tipo}
+    return meta
+
+
+def _proximo_rotulo(ctx: dict, base: str) -> str:
+    ctx["rotulo"] = ctx.get("rotulo", 0) + 1
+    return f"L_{base}_{ctx['rotulo']}"
+
+
+def gerarArvoreAtribuida(arvore: dict, tabela: TabelaSimbolos) -> dict:
+    """Enriquece a AST (já tipada) com metadados para Assembly.
+
+    Pré-condição: a AST deve ter passado por :func:`verificarTipos`
+    (todos os nós relevantes têm ``tipo_inferido``). A AST é mutada
+    in-place e também devolvida.
+    """
+    if not arvore or arvore.get("tipo") != "program":
+        return arvore
+
+    ctx: dict = {"rotulo": 0}
+
+    def visitar(no) -> None:
+        if not isinstance(no, dict):
+            return
+        t = no.get("tipo")
+
+        if t == "number":
+            no["meta_asm"] = _meta_asm_base(no, ctx)
+            return
+
+        if t == "mem_read":
+            sim = tabela.obter(no.get("nome", ""))
+            if sim is not None:
+                no["simbolo_ref"] = {
+                    "nome": sim["nome"],
+                    "tipo": sim["tipo"],
+                    "linha_def": sim["linha_def"],
+                    "escopo": sim["escopo"],
+                }
+            meta = _meta_asm_base(no, ctx)
+            meta["mem_label"] = f"mem_{no.get('nome', '').lower()}"
+            no["meta_asm"] = meta
+            return
+
+        if t == "mem_write":
+            visitar(no.get("valor"))
+            sim = tabela.obter(no.get("nome", ""))
+            if sim is not None:
+                no["simbolo_ref"] = {
+                    "nome": sim["nome"],
+                    "tipo": sim["tipo"],
+                    "linha_def": sim["linha_def"],
+                    "escopo": sim["escopo"],
+                }
+            meta = _meta_asm_base(no, ctx)
+            meta["mem_label"] = f"mem_{no.get('nome', '').lower()}"
+            no["meta_asm"] = meta
+            return
+
+        if t == "res_ref":
+            no["meta_asm"] = _meta_asm_base(no, ctx)
+            return
+
+        if t == "binary":
+            visitar(no.get("esq"))
+            visitar(no.get("dir"))
+            meta = _meta_asm_base(no, ctx)
+            op = no.get("op", "")
+            t_esq = (no.get("esq") or {}).get("tipo_inferido", TIPO_INDEF)
+            t_dir = (no.get("dir") or {}).get("tipo_inferido", TIPO_INDEF)
+            meta["op"] = op
+            meta["instrucao_sugerida"] = _instrucao_sugerida(op, t_esq, t_dir)
+            no["meta_asm"] = meta
+            return
+
+        if t == "if":
+            visitar(no.get("cond"))
+            visitar(no.get("then_block"))
+            meta = _meta_asm_base(no, ctx)
+            meta["label_fim"] = _proximo_rotulo(ctx, "if_fim")
+            no["meta_asm"] = meta
+            return
+
+        if t == "ifelse":
+            visitar(no.get("cond"))
+            visitar(no.get("then_block"))
+            visitar(no.get("else_block"))
+            meta = _meta_asm_base(no, ctx)
+            meta["label_else"] = _proximo_rotulo(ctx, "else")
+            meta["label_fim"] = _proximo_rotulo(ctx, "ife_fim")
+            no["meta_asm"] = meta
+            return
+
+        if t == "while":
+            visitar(no.get("cond"))
+            visitar(no.get("body"))
+            meta = _meta_asm_base(no, ctx)
+            meta["label_inicio"] = _proximo_rotulo(ctx, "while_i")
+            meta["label_fim"] = _proximo_rotulo(ctx, "while_f")
+            no["meta_asm"] = meta
+            return
+
+    for stmt in arvore.get("stmts", []):
+        visitar(stmt)
+
+    return arvore
+
+
+def _instrucao_sugerida(op: str, t_esq: str, t_dir: str) -> str:
+    """Devolve a string da instrução ARM que o gerador deveria emitir.
+
+    Serve como documentação dentro da árvore atribuída e também guia o
+    gerador de Assembly da Etapa 5 (ele inspeciona ``meta_asm``).
+    """
+    if op in _OPS_RELACIONAIS:
+        if t_esq == TIPO_INT and t_dir == TIPO_INT:
+            return "CMP+MOV"
+        return "VCMP.F64+MOV"
+    if op == "|":
+        return "VDIV.F64"
+    if op == "/":
+        return "BL __op_idiv"
+    if op == "%":
+        return "BL __op_mod"
+    if op == "^":
+        return "BL __op_pow"
+    if op in ("+", "-", "*"):
+        # ARM puro para int, VFP para real
+        if t_esq == TIPO_INT and t_dir == TIPO_INT:
+            return {"+": "ADD", "-": "SUB", "*": "MUL"}[op]
+        return {"+": "VADD.F64", "-": "VSUB.F64", "*": "VMUL.F64"}[op]
+    return "?"
+
+
+# ---- Serialização ----------------------------------------------------
+
+
+def serializarArvoreAtribuidaJSON(arvore: dict) -> str:
+    import json
+
+    return json.dumps(arvore, ensure_ascii=False, indent=2)
+
+
+def serializarArvoreAtribuidaMarkdown(arvore: dict) -> str:
+    """Render bonito em Markdown (árvore indentada com tipo + meta)."""
+    if not arvore or arvore.get("tipo") != "program":
+        return "# Árvore Atribuída\n\n_Vazia._\n"
+    linhas: list[str] = ["# Árvore Sintática Atribuída\n"]
+    linhas.append("Cada nó traz `tipo_inferido` (Etapa 3) e `meta_asm` (Etapa 4).\n")
+    linhas.append("```text")
+    for i, stmt in enumerate(arvore.get("stmts", []), 1):
+        linhas.append(f"stmt #{i}")
+        _render_no(stmt, linhas, prefixo="  ")
+    linhas.append("```")
+    return "\n".join(linhas) + "\n"
+
+
+def _render_no(no, linhas: list[str], prefixo: str) -> None:
+    if not isinstance(no, dict):
+        linhas.append(f"{prefixo}<{no!r}>")
+        return
+    t = no.get("tipo", "?")
+    ti = no.get("tipo_inferido", "—")
+    meta = no.get("meta_asm", {})
+    cab = f"{prefixo}{t}  : tipo={ti}"
+    if meta:
+        extras = []
+        if "instrucao_sugerida" in meta:
+            extras.append(f"instr={meta['instrucao_sugerida']}")
+        if "registrador" in meta:
+            extras.append(f"reg={meta['registrador']}")
+        if "label_inicio" in meta:
+            extras.append(f"L_ini={meta['label_inicio']}")
+        if "label_else" in meta:
+            extras.append(f"L_else={meta['label_else']}")
+        if "label_fim" in meta:
+            extras.append(f"L_fim={meta['label_fim']}")
+        if "mem_label" in meta:
+            extras.append(f"mem={meta['mem_label']}")
+        if extras:
+            cab += "  [" + ", ".join(extras) + "]"
+    if t == "number":
+        cab += f"  valor={no.get('valor')!r}"
+    if t == "res_ref":
+        cab += f"  linhas_atras={no.get('linhas_atras')}"
+    if t in ("mem_read", "mem_write"):
+        cab += f"  nome={no.get('nome')!r}"
+    if "simbolo_ref" in no:
+        s = no["simbolo_ref"]
+        cab += f"  → sim(tipo={s['tipo']}, def={s['linha_def']})"
+    linhas.append(cab)
+
+    filhos = []
+    for chave in ("valor", "esq", "dir", "cond", "then_block", "else_block", "body"):
+        if chave in no:
+            filhos.append((chave, no[chave]))
+    for chave, filho in filhos:
+        linhas.append(f"{prefixo}  ├─ {chave}:")
+        _render_no(filho, linhas, prefixo + "  │  ")
+
+
+def salvarArvoreAtribuida(
+    arvore: dict,
+    diretorio: str | Path = "output",
+) -> tuple[Path, Path]:
+    """Escreve a árvore atribuída em ``output/arvore_atribuida.{md,json}``.
+
+    Devolve ``(caminho_md, caminho_json)``.
+    """
+    base = Path(diretorio)
+    base.mkdir(parents=True, exist_ok=True)
+    p_md = base / "arvore_atribuida.md"
+    p_json = base / "arvore_atribuida.json"
+    p_md.write_text(serializarArvoreAtribuidaMarkdown(arvore), encoding="utf-8")
+    p_json.write_text(serializarArvoreAtribuidaJSON(arvore), encoding="utf-8")
+    return p_md, p_json
