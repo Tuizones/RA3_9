@@ -26,6 +26,7 @@ from src.pipeline import (
     salvarTokens,
     executar_fase2,
     gerarAssembly,
+    prepararEntradaSemantica,
 )
 
 
@@ -197,16 +198,22 @@ class TestLerTokens(unittest.TestCase):
 
 
 class TestLerArquivoEFluxo(unittest.TestCase):
-    def test_ler_arquivo_ignora_comentarios(self):
+    def test_ler_arquivo_ignora_linhas_em_branco(self):
+        # Coment\u00e1rios da linguagem usam ``*{ ... }*`` e s\u00e3o removidos
+        # somente na fase de tokeniza\u00e7\u00e3o. lerArquivo deve apenas pular
+        # linhas em branco \u2014 ``#`` n\u00e3o \u00e9 mais reconhecido como coment\u00e1rio.
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False, encoding="utf-8"
         ) as f:
-            f.write("# comentario\n(START)\n\n(1 2 +)\n(END)\n")
+            f.write("(START)\n\n*{ comentario }*\n(1 2 +)\n(END)\n")
             nome = f.name
         try:
             linhas = []
             lerArquivo(nome, linhas)
-            self.assertEqual(linhas, ["(START)", "(1 2 +)", "(END)"])
+            self.assertEqual(
+                linhas,
+                ["(START)", "*{ comentario }*", "(1 2 +)", "(END)"],
+            )
         finally:
             os.unlink(nome)
 
@@ -224,6 +231,129 @@ class TestLerArquivoEFluxo(unittest.TestCase):
             )
             self.assertIn("VADD.F64", r["assembly"])
             self.assertEqual(r["arvore"]["stmts"][1]["tipo"], "res_ref")
+
+
+class TestPrepararEntradaSemantica(unittest.TestCase):
+    """Fase 3 §3 — função ``prepararEntradaSemantica(arquivo)``."""
+
+    def _escrever(self, d, conteudo):
+        caminho = os.path.join(d, "p.txt")
+        with open(caminho, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+        return caminho
+
+    def test_arquivo_valido_retorna_arvore(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._escrever(d, "(START)\n(1 2 +)\n(END)\n")
+            r = prepararEntradaSemantica(src)
+        self.assertEqual(r["erros_lexsint"], [])
+        self.assertIsNotNone(r["arvore"])
+        self.assertEqual(r["arvore"]["tipo"], "program")
+        self.assertTrue(len(r["tokens"]) > 0)
+
+    def test_descarta_comentarios(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._escrever(
+                d,
+                "(START)\n*{ comentario }*\n(1 *{ x }* 2 +)\n(END)\n",
+            )
+            r = prepararEntradaSemantica(src)
+        self.assertEqual(r["erros_lexsint"], [])
+        valores = [t.valor for t in r["tokens"]]
+        self.assertNotIn("*{", valores)
+        self.assertNotIn("}*", valores)
+
+    def test_erro_lexico_vai_para_lista(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._escrever(d, "(START)\n(1 & 2 +)\n(END)\n")
+            r = prepararEntradaSemantica(src)
+        self.assertIsNone(r["arvore"])
+        self.assertTrue(any("[léxico]" in e for e in r["erros_lexsint"]))
+
+    def test_comentario_aberto_vai_para_lista(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._escrever(d, "(START)\n*{ aberto\n(1 2 +)\n(END)\n")
+            r = prepararEntradaSemantica(src)
+        self.assertIsNone(r["arvore"])
+        self.assertTrue(any("não fechado" in e for e in r["erros_lexsint"]))
+
+    def test_erro_sintatico_vai_para_lista(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._escrever(d, "(START)\n(1 2)\n(END)\n")
+            r = prepararEntradaSemantica(src)
+        self.assertIsNone(r["arvore"])
+        self.assertTrue(any("[sintático]" in e for e in r["erros_lexsint"]))
+
+    def test_falta_start_eh_reportado(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._escrever(d, "(1 2 +)\n(END)\n")
+            r = prepararEntradaSemantica(src)
+        self.assertIsNone(r["arvore"])
+        self.assertTrue(
+            any("(START)" in e for e in r["erros_lexsint"]),
+            f"erros: {r['erros_lexsint']}",
+        )
+
+    def test_falta_end_eh_reportado(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = self._escrever(d, "(START)\n(1 2 +)\n")
+            r = prepararEntradaSemantica(src)
+        self.assertIsNone(r["arvore"])
+        self.assertTrue(
+            any("(END)" in e for e in r["erros_lexsint"]),
+            f"erros: {r['erros_lexsint']}",
+        )
+
+
+class TestAssemblyTipado(unittest.TestCase):
+    """Sprint 5 / Etapa 5: dispatch ARM int x VFP real por tipo_inferido."""
+
+    def _gerar(self, fonte: str) -> str:
+        from src.semantica import (
+            construirTabelaSimbolos,
+            gerarArvoreAtribuida,
+            verificarTipos,
+        )
+        from src.armv7_generator import gerar_assembly_de_arvore_atribuida
+
+        linhas = fonte.splitlines()
+        tokens = tokenizar_programa(linhas)
+        gram = construirGramatica()
+        resultado = parsear(tokens, gram)
+        ast = gerarArvore(resultado)
+        tabela, e1 = construirTabelaSimbolos(ast)
+        ast2, e2 = verificarTipos(ast, tabela)
+        self.assertEqual(e1, [])
+        self.assertEqual(e2, [])
+        atribuida = gerarArvoreAtribuida(ast2, tabela)
+        return gerar_assembly_de_arvore_atribuida(atribuida)
+
+    def test_int_soma_usa_add_arm(self):
+        asm = self._gerar("(START)\n(1 2 +)\n(END)\n")
+        self.assertIn("tipo=int +", asm)
+        self.assertIn("ADD r0, r0, r1", asm)
+        self.assertNotIn("VADD.F64 d0, d0, d1", asm)
+
+    def test_real_soma_usa_vadd(self):
+        asm = self._gerar("(START)\n(1.0 2.0 +)\n(END)\n")
+        self.assertIn("VADD.F64 d0, d0, d1", asm)
+        self.assertNotIn("ADD r0, r0, r1", asm)
+
+    def test_int_subtracao_e_multiplicacao(self):
+        asm = self._gerar("(START)\n(5 2 -)\n(3 4 *)\n(END)\n")
+        self.assertIn("SUB r0, r0, r1", asm)
+        self.assertIn("MUL r0, r0, r1", asm)
+
+    def test_int_relacional_usa_cmp_movcc(self):
+        asm = self._gerar("(START)\n(1 2 <)\n(END)\n")
+        self.assertIn("CMP r0, r1", asm)
+        self.assertIn("MOVLT r0, #1", asm)
+
+    def test_cabecalho_lista_tipos_por_stmt(self):
+        asm = self._gerar("(START)\n(1 2 +)\n(1.0 2.0 +)\n(END)\n")
+        self.assertIn("ÁRVORE SINTÁTICA ATRIBUÍDA", asm)
+        self.assertIn("stmt #1: int", asm)
+        self.assertIn("stmt #2: real", asm)
 
 
 if __name__ == "__main__":
