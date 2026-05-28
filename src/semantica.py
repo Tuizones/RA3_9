@@ -438,3 +438,70 @@ def verificarTipos(
 
 
 def _tipar_binario(no: dict, tipar, erros: list[ErroSemantico]) -> str:
+    op = no.get("op", "")
+    linha = no.get("linha", 0) or 0
+    te = tipar(no.get("esq"))
+    td = tipar(no.get("dir"))
+
+    numericos = {TIPO_INT, TIPO_REAL}
+
+    if op in _OPS_RELACIONAIS:
+        if TIPO_INDEF in (te, td):
+            return TIPO_BOOL
+        if te == td and te in numericos:
+            return TIPO_BOOL
+        _emitir(
+            erros,
+            f"operador relacional '{op}' exige operandos numéricos do mesmo tipo, "
+            f"recebeu '{te}' e '{td}'",
+            linha,
+        )
+        return TIPO_BOOL
+
+    if op == "|":
+        if TIPO_INDEF in (te, td):
+            return TIPO_REAL
+        if te == TIPO_REAL and td == TIPO_REAL:
+            return TIPO_REAL
+        _emitir(
+            erros,
+            f"operador '|' (divisão real) exige operandos 'real', recebeu '{te}' e '{td}'",
+            linha,
+        )
+        return TIPO_REAL
+
+    if op in _OPS_INT:
+        if TIPO_INDEF in (te, td):
+            return TIPO_INT
+        if te == TIPO_INT and td == TIPO_INT:
+            return TIPO_INT
+        _emitir(
+            erros,
+            f"operador '{op}' exige operandos 'int', recebeu '{te}' e '{td}'",
+            linha,
+        )
+        return TIPO_INT
+
+    # operadores que aceitam int OU real (homogêneo): + - * ^
+    if TIPO_INDEF in (te, td):
+        # propaga o tipo conhecido (se houver) — evita avalanche
+        if te in numericos:
+            return te
+        if td in numericos:
+            return td
+        return TIPO_INDEF
+    if te == td and te in numericos:
+        return te
+    _emit(
+        erros,
+        f"operador '{op}' exige operandos numéricos do mesmo tipo (sem promoção implícita), "
+        f"recebeu '{te}' e '{td}'",
+        linha,
+    )
+    return TIPO_INDEF
+
+
+def _emit(erros: list[ErroSemantico], msg: str, linha: int) -> None:  # pragma: no cover - alias
+    _emitir(erros, msg, linha)
+
+
