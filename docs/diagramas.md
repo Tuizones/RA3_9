@@ -298,3 +298,113 @@ sequenceDiagram
     G-->>P: {regras, FIRST, FOLLOW, tabela}
     P->>G: parsear(tokens, gram)
     G-->>P: {derivacao, tokens}
+    P->>G: gerarArvore(resultado)
+    G-->>P: ast (dict "program")
+    P->>FS: salvar arvore.json + arvore.md
+    P->>A: gerarAssembly(ast)
+    A-->>P: string ".s"
+    P->>FS: salvar ultima_execucao.s
+    P-->>M: resultado
+    M->>FS: salvar gramatica_dump.md
+    M->>FS: salvar derivacao_ultima_execucao.md
+    M->>U: imprime resumo + árvore
+```
+
+---
+
+## 9. FIRST/FOLLOW — fluxo do ponto fixo
+
+Como `_calcular_first` e `_calcular_follow` convergem por iteração até
+nenhum conjunto mudar.
+
+```mermaid
+flowchart TD
+    S([início]) --> I["FIRST[A] = âˆ… para todo NT<br/>(ou FOLLOW[S] = {$})"]
+    I --> L{"mudou = False<br/>percorrer todas as<br/>produções A → Î±"}
+    L --> P["aplicar regras:<br/>FIRST: termos de FIRST(Î±)<br/>FOLLOW: FIRST(Î²) e FOLLOW(A)"]
+    P --> Q{"algum conjunto<br/>cresceu?"}
+    Q -- sim --> M["mudou = True"]
+    M --> L
+    Q -- não --> C{"mudou ?"}
+    C -- sim --> L
+    C -- não --> F([ponto fixo atingido])
+
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class F ok
+```
+
+> A garantia de terminação vem do fato de que os conjuntos só
+> **crescem** (são monótonos) e o universo de terminais é finito.
+
+---
+
+## 10. Construção da tabela LL(1) — fluxo de decisão
+
+Como cada produção contribui para a tabela `M[A, t]` em
+`_construir_tabela_ll1()`.
+
+```mermaid
+flowchart TD
+    A([para cada produção A → Î±<br/>com índice idx]) --> B["calcular FIRST(Î±)"]
+    B --> C{"para cada t âˆˆ<br/>FIRST(Î±) âˆ’ {Îµ}"}
+    C --> D{"M[A,t] já<br/>existe?"}
+    D -- não --> E["M[A,t] = idx"]
+    D -- sim, mesma idx --> E
+    D -- sim, outra produção --> X1(["registrar conflito"])
+    E --> C
+    C -- fim --> F{"Îµ âˆˆ FIRST(Î±) ?"}
+    F -- não --> Z([próxima produção])
+    F -- sim --> G{"para cada t âˆˆ<br/>FOLLOW(A)"}
+    G --> H{"M[A,t] já<br/>existe?"}
+    H -- não --> I["M[A,t] = idx"]
+    H -- sim, mesma idx --> I
+    H -- sim, outra produção --> X2(["registrar conflito"])
+    I --> G
+    G -- fim --> Z
+    Z --> A
+    A -- fim --> R{"conflitos<br/>encontrados?"}
+    R -- não --> OK([tabela pronta])
+    R -- sim --> ERR(["raise Erros<br/>'Gramática não é LL(1)'"])
+
+    classDef err fill:#fee2e2,stroke:#dc2626
+    classDef ok fill:#dcfce7,stroke:#16a34a
+    class X1,X2,ERR err
+    class OK ok
+```
+
+---
+
+## 11. Decisão por aridade no `parse_expr` (gerarArvore)
+
+Como `gerarArvore()` usa o **número de itens** dentro dos parênteses
+para escolher o tipo do nó da AST. Esse é o "outro lado" do que torna
+a gramática LL(1): a palavra-chave/operador final de cada expressão é
+o discriminador.
+
+```mermaid
+flowchart TD
+    P[("(  itens...  )")] --> N{"len(itens) ?"}
+    N -- 1 --> A1["mem_read<br/>(MEM)"]
+    N -- 2 --> B{"itens[1].tipo ?"}
+    B -- ident --> A2["mem_write<br/>(V MEM)"]
+    B -- "keyword RES" --> A3["res_ref<br/>(N RES)"]
+    N -- 3 --> C{"itens[2] ?"}
+    C -- "keyword IF" --> A4["if<br/>(C B IF)"]
+    C -- "keyword WHILE" --> A5["while<br/>(C B WHILE)"]
+    C -- "operador" --> A6["binary<br/>(E1 E2 OP)"]
+    N -- 4 --> A7["ifelse<br/>(C T E IFELSE)"]
+
+    classDef ast fill:#e0e7ff,stroke:#4338ca
+    class A1,A2,A3,A4,A5,A6,A7 ast
+```
+
+> Note que **a forma pós-fixada** da linguagem é o que permite essa
+> decisão direta: o "verbo" (operador ou keyword) sempre aparece por
+> último, depois que todos os operandos já foram lidos.
+
+---
+
+## 12. Árvore de derivação LL(1) (exemplo real)
+
+A **árvore de derivação** (ou *parse tree*) mostra como o **analisador
+sintático descendente recursivo do tipo LL(1)** expande os
