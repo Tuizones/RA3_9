@@ -375,7 +375,7 @@ O passo a passo completo da última execução está em
 
 ## 5. Árvore Sintática do Último Teste (`teste1.txt`)
 
-Gerada pelo comando `python AnalisadorSintatico.py teste1.txt`, salva também em
+Gerada pelo comando `python AnalisadorSemantico.py teste1.txt`, salva também em
 [`output/arvore_ultima_execucao.txt`](output/arvore_ultima_execucao.txt)
 e [`output/arvore_ultima_execucao.json`](output/arvore_ultima_execucao.json):
 
@@ -439,3 +439,4 @@ program
       number(2)
       number(4)
 ```
+
