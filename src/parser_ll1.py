@@ -505,7 +505,7 @@ def parsear(tokens: list[Token], tabela_ll1: dict) -> dict:
 
     if erros:
         # Reporta todos os erros em uma unica excecao multi-linha. O caller
-        # (AnalisadorSintatico.py) imprime a mensagem inteira.
+        # (AnalisadorSemantico.py) imprime a mensagem inteira.
         cabecalho = (
             f"Foram encontrados {len(erros)} erro(s) sintatico(s) "
             f"(analise prosseguiu em modo panico para reportar todos):"
@@ -570,6 +570,8 @@ def gerarArvore(resultado_parse: dict) -> dict:
         raise Erros(f"Item inválido: {_descreve(tok, t)}")
 
     def parse_expr() -> dict:
+        # captura a linha do '(' que abre a expressão para anotar no nó
+        linha_inicio = tokens[pos[0]].linha if pos[0] < len(tokens) else 0
         esperar_terminal(T_LPAREN)
         primeiro = parse_item()
 
@@ -581,7 +583,7 @@ def gerarArvore(resultado_parse: dict) -> dict:
             pos[0] += 1
             if primeiro["tipo"] != "ident":
                 raise Erros("Comando (MEM) exige identificador em letras maiúsculas")
-            return {"tipo": "mem_read", "nome": primeiro["valor"]}
+            return {"tipo": "mem_read", "nome": primeiro["valor"], "linha": linha_inicio}
 
         segundo = parse_item()
         tok = tokens[pos[0]]
@@ -594,27 +596,27 @@ def gerarArvore(resultado_parse: dict) -> dict:
             if segundo.get("tipo") == "keyword" and segundo.get("valor") == "RES":
                 if primeiro.get("tipo") != "number" or not _eh_int_nao_negativo(primeiro.get("valor", "")):
                     raise Erros("Comando (N RES) exige N inteiro não negativo")
-                return {"tipo": "res_ref", "linhas_atras": int(primeiro["valor"])}
+                return {"tipo": "res_ref", "linhas_atras": int(primeiro["valor"]), "linha": linha_inicio}
             # (V MEM)
             if segundo.get("tipo") == "ident":
-                return {"tipo": "mem_write", "nome": segundo["valor"], "valor": primeiro}
+                return {"tipo": "mem_write", "nome": segundo["valor"], "valor": primeiro, "linha": linha_inicio}
             raise Erros("Expressão de dois itens inválida")
 
         # binop + ')'
         if tok.tipo == TIPO_OPERADOR and tok.valor in BINOPS:
             pos[0] += 1
             esperar_terminal(T_RPAREN)
-            return {"tipo": "binary", "op": tok.valor, "esq": primeiro, "dir": segundo}
+            return {"tipo": "binary", "op": tok.valor, "esq": primeiro, "dir": segundo, "linha": linha_inicio}
 
         # kw_ctrl3 + ')'  -> (COND BODY IF) ou (COND BODY WHILE)
         if t == T_IF:
             pos[0] += 1
             esperar_terminal(T_RPAREN)
-            return {"tipo": "if", "cond": primeiro, "then_block": segundo}
+            return {"tipo": "if", "cond": primeiro, "then_block": segundo, "linha": linha_inicio}
         if t == T_WHILE:
             pos[0] += 1
             esperar_terminal(T_RPAREN)
-            return {"tipo": "while", "cond": primeiro, "body": segundo}
+            return {"tipo": "while", "cond": primeiro, "body": segundo, "linha": linha_inicio}
 
         # terceiro item -> (COND THEN ELSE IFELSE)
         terceiro = parse_item()
@@ -632,6 +634,7 @@ def gerarArvore(resultado_parse: dict) -> dict:
             "cond": primeiro,
             "then_block": segundo,
             "else_block": terceiro,
+            "linha": linha_inicio,
         }
 
     # program: ( START ) stmt_list ( END )

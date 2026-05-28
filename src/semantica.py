@@ -670,3 +670,85 @@ def _instrucao_sugerida(op: str, t_esq: str, t_dir: str) -> str:
     return "?"
 
 
+# ---- Serialização ----------------------------------------------------
+
+
+def serializarArvoreAtribuidaJSON(arvore: dict) -> str:
+    import json
+
+    return json.dumps(arvore, ensure_ascii=False, indent=2)
+
+
+def serializarArvoreAtribuidaMarkdown(arvore: dict) -> str:
+    """Render bonito em Markdown (árvore indentada com tipo + meta)."""
+    if not arvore or arvore.get("tipo") != "program":
+        return "# Árvore Atribuída\n\n_Vazia._\n"
+    linhas: list[str] = ["# Árvore Sintática Atribuída\n"]
+    linhas.append("Cada nó traz `tipo_inferido` (Etapa 3) e `meta_asm` (Etapa 4).\n")
+    linhas.append("```text")
+    for i, stmt in enumerate(arvore.get("stmts", []), 1):
+        linhas.append(f"stmt #{i}")
+        _render_no(stmt, linhas, prefixo="  ")
+    linhas.append("```")
+    return "\n".join(linhas) + "\n"
+
+
+def _render_no(no, linhas: list[str], prefixo: str) -> None:
+    if not isinstance(no, dict):
+        linhas.append(f"{prefixo}<{no!r}>")
+        return
+    t = no.get("tipo", "?")
+    ti = no.get("tipo_inferido", "—")
+    meta = no.get("meta_asm", {})
+    cab = f"{prefixo}{t}  : tipo={ti}"
+    if meta:
+        extras = []
+        if "instrucao_sugerida" in meta:
+            extras.append(f"instr={meta['instrucao_sugerida']}")
+        if "registrador" in meta:
+            extras.append(f"reg={meta['registrador']}")
+        if "label_inicio" in meta:
+            extras.append(f"L_ini={meta['label_inicio']}")
+        if "label_else" in meta:
+            extras.append(f"L_else={meta['label_else']}")
+        if "label_fim" in meta:
+            extras.append(f"L_fim={meta['label_fim']}")
+        if "mem_label" in meta:
+            extras.append(f"mem={meta['mem_label']}")
+        if extras:
+            cab += "  [" + ", ".join(extras) + "]"
+    if t == "number":
+        cab += f"  valor={no.get('valor')!r}"
+    if t == "res_ref":
+        cab += f"  linhas_atras={no.get('linhas_atras')}"
+    if t in ("mem_read", "mem_write"):
+        cab += f"  nome={no.get('nome')!r}"
+    if "simbolo_ref" in no:
+        s = no["simbolo_ref"]
+        cab += f"  → sim(tipo={s['tipo']}, def={s['linha_def']})"
+    linhas.append(cab)
+
+    filhos = []
+    for chave in ("valor", "esq", "dir", "cond", "then_block", "else_block", "body"):
+        if chave in no:
+            filhos.append((chave, no[chave]))
+    for chave, filho in filhos:
+        linhas.append(f"{prefixo}  ├─ {chave}:")
+        _render_no(filho, linhas, prefixo + "  │  ")
+
+
+def salvarArvoreAtribuida(
+    arvore: dict,
+    diretorio: str | Path = "output",
+) -> tuple[Path, Path]:
+    """Escreve a árvore atribuída em ``output/arvore_atribuida.{md,json}``.
+
+    Devolve ``(caminho_md, caminho_json)``.
+    """
+    base = Path(diretorio)
+    base.mkdir(parents=True, exist_ok=True)
+    p_md = base / "arvore_atribuida.md"
+    p_json = base / "arvore_atribuida.json"
+    p_md.write_text(serializarArvoreAtribuidaMarkdown(arvore), encoding="utf-8")
+    p_json.write_text(serializarArvoreAtribuidaJSON(arvore), encoding="utf-8")
+    return p_md, p_json
