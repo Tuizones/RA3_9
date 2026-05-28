@@ -215,3 +215,231 @@ def _check(fonte: str):
     return arvore, tabela, erros
 
 
+class TestVerificarTiposFelizes(unittest.TestCase):
+    def test_soma_int_int(self):
+        ast, _, erros = _check("(START)\n(1 2 +)\n(END)\n")
+        self.assertEqual(erros, [])
+        self.assertEqual(ast["stmts"][0]["tipo_inferido"], TIPO_INT)
+
+    def test_soma_real_real(self):
+        ast, _, erros = _check("(START)\n(1.5 2.0 +)\n(END)\n")
+        self.assertEqual(erros, [])
+        self.assertEqual(ast["stmts"][0]["tipo_inferido"], TIPO_REAL)
+
+    def test_divisao_inteira_ok(self):
+        ast, _, erros = _check("(START)\n(10 3 /)\n(END)\n")
+        self.assertEqual(erros, [])
+        self.assertEqual(ast["stmts"][0]["tipo_inferido"], TIPO_INT)
+
+    def test_divisao_real_ok(self):
+        ast, _, erros = _check("(START)\n(10.0 3.0 |)\n(END)\n")
+        self.assertEqual(erros, [])
+        self.assertEqual(ast["stmts"][0]["tipo_inferido"], TIPO_REAL)
+
+    def test_relacional_produz_bool(self):
+        ast, _, erros = _check("(START)\n(1 2 <)\n(END)\n")
+        self.assertEqual(erros, [])
+        self.assertEqual(ast["stmts"][0]["tipo_inferido"], TIPO_BOOL)
+
+    def test_if_com_cond_bool(self):
+        ast, _, erros = _check("(START)\n((1 2 <) (3 4 +) IF)\n(END)\n")
+        self.assertEqual(erros, [])
+        # tipo do IF = tipo do then_block (int)
+        self.assertEqual(ast["stmts"][0]["tipo_inferido"], TIPO_INT)
+
+    def test_ifelse_ramos_consistentes(self):
+        ast, _, erros = _check(
+            "(START)\n((1 2 <) (3 4 +) (5 6 +) IFELSE)\n(END)\n"
+        )
+        self.assertEqual(erros, [])
+        self.assertEqual(ast["stmts"][0]["tipo_inferido"], TIPO_INT)
+
+
+class TestVerificarTiposErros(unittest.TestCase):
+    def test_soma_int_real_eh_erro(self):
+        _, _, erros = _check("(START)\n(1 2.5 +)\n(END)\n")
+        self.assertEqual(len(erros), 1)
+        self.assertIn("'+'", erros[0].mensagem)
+        self.assertIn("sem promoção", erros[0].mensagem)
+
+    def test_divisao_inteira_com_real_eh_erro(self):
+        _, _, erros = _check("(START)\n(10.0 3.0 /)\n(END)\n")
+        self.assertEqual(len(erros), 1)
+        self.assertIn("'/'", erros[0].mensagem)
+        self.assertIn("'int'", erros[0].mensagem)
+
+    def test_divisao_real_com_int_eh_erro(self):
+        _, _, erros = _check("(START)\n(10 3 |)\n(END)\n")
+        self.assertEqual(len(erros), 1)
+        self.assertIn("'|'", erros[0].mensagem)
+        self.assertIn("'real'", erros[0].mensagem)
+
+    def test_if_com_cond_nao_bool_eh_erro(self):
+        _, _, erros = _check("(START)\n(5 (1 2 +) IF)\n(END)\n")
+        self.assertEqual(len(erros), 1)
+        self.assertIn("IF", erros[0].mensagem)
+        self.assertIn("'bool'", erros[0].mensagem)
+
+    def test_while_com_cond_nao_bool_eh_erro(self):
+        _, _, erros = _check("(START)\n(0 (1 2 +) WHILE)\n(END)\n")
+        self.assertEqual(len(erros), 1)
+        self.assertIn("WHILE", erros[0].mensagem)
+
+    def test_ifelse_com_ramos_divergentes_eh_erro(self):
+        # then = int, else = real → divergente
+        _, _, erros = _check(
+            "(START)\n((1 2 <) (3 4 +) (3.0 4.0 +) IFELSE)\n(END)\n"
+        )
+        self.assertEqual(len(erros), 1)
+        self.assertIn("IFELSE", erros[0].mensagem)
+        self.assertIn("divergentes", erros[0].mensagem)
+
+    def test_relacional_com_tipos_distintos_eh_erro(self):
+        _, _, erros = _check("(START)\n(1 2.5 <)\n(END)\n")
+        self.assertEqual(len(erros), 1)
+        self.assertIn("'<'", erros[0].mensagem)
+
+
+# --------------------------------------------------------------
+# Sprint 4 / Etapa 4: Árvore Sintática Atribuída
+# --------------------------------------------------------------
+
+
+class TestArvoreAtribuida(unittest.TestCase):
+    def _atribuida(self, fonte: str):
+        ast = _ast(fonte)
+        tabela, erros1 = construirTabelaSimbolos(ast)
+        ast2, erros2 = verificarTipos(ast, tabela)
+        self.assertEqual(erros1, [])
+        self.assertEqual(erros2, [])
+        return gerarArvoreAtribuida(ast2, tabela), tabela
+
+    def test_binary_int_recebe_instrucao_add(self):
+        arv, _ = self._atribuida("(START)\n(1 2 +)\n(END)\n")
+        bin_no = arv["stmts"][0]
+        self.assertEqual(bin_no["tipo"], "binary")
+        self.assertEqual(bin_no["meta_asm"]["instrucao_sugerida"], "ADD")
+        self.assertEqual(bin_no["meta_asm"]["registrador"], "R0")
+        self.assertEqual(bin_no["tipo_inferido"], "int")
+
+    def test_binary_real_recebe_vadd_e_d0(self):
+        arv, _ = self._atribuida("(START)\n(1.0 2.0 +)\n(END)\n")
+        bin_no = arv["stmts"][0]
+        self.assertEqual(bin_no["meta_asm"]["instrucao_sugerida"], "VADD.F64")
+        self.assertEqual(bin_no["meta_asm"]["registrador"], "D0")
+
+    def test_memwrite_carrega_simbolo_ref(self):
+        arv, tabela = self._atribuida(
+            "(START)\n(10 X)\n((X) 1 +)\n(END)\n"
+        )
+        decl = arv["stmts"][0]   # mem_write X
+        self.assertEqual(decl["tipo"], "mem_write")
+        self.assertEqual(decl["simbolo_ref"]["nome"], "X")
+        self.assertEqual(decl["simbolo_ref"]["tipo"], TIPO_INT)
+        self.assertEqual(decl["meta_asm"]["mem_label"], "mem_x")
+
+    def test_if_recebe_label_fim(self):
+        arv, _ = self._atribuida(
+            "(START)\n((1 2 <) (3 4 +) IF)\n(END)\n"
+        )
+        no = arv["stmts"][0]
+        self.assertEqual(no["tipo"], "if")
+        self.assertIn("label_fim", no["meta_asm"])
+
+    def test_ifelse_recebe_dois_labels(self):
+        arv, _ = self._atribuida(
+            "(START)\n((1 2 <) (3 4 +) (5 6 +) IFELSE)\n(END)\n"
+        )
+        no = arv["stmts"][0]
+        self.assertEqual(no["tipo"], "ifelse")
+        self.assertIn("label_else", no["meta_asm"])
+        self.assertIn("label_fim", no["meta_asm"])
+
+    def test_while_recebe_label_inicio_e_fim(self):
+        arv, _ = self._atribuida(
+            "(START)\n((1 2 <) (3 4 +) WHILE)\n(END)\n"
+        )
+        no = arv["stmts"][0]
+        self.assertEqual(no["tipo"], "while")
+        self.assertIn("label_inicio", no["meta_asm"])
+        self.assertIn("label_fim", no["meta_asm"])
+
+    def test_serializacao_json_e_md(self):
+        import json
+
+        arv, _ = self._atribuida("(START)\n(1 2 +)\n(END)\n")
+        js = serializarArvoreAtribuidaJSON(arv)
+        # round-trip por JSON
+        decod = json.loads(js)
+        self.assertEqual(decod["tipo"], "program")
+        md = serializarArvoreAtribuidaMarkdown(arv)
+        self.assertIn("Árvore Sintática Atribuída", md)
+        self.assertIn("instr=ADD", md)
+
+    def test_salvar_arvore_atribuida_em_disco(self):
+        import tempfile
+
+        arv, _ = self._atribuida("(START)\n(1 2 +)\n(END)\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            p_md, p_json = salvarArvoreAtribuida(arv, diretorio=tmp)
+            self.assertTrue(p_md.exists())
+            self.assertTrue(p_json.exists())
+            self.assertIn("Árvore", p_md.read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()
+
+    def test_multiplos_erros_acumulam(self):
+        _, _, erros = _check(
+            "(START)\n"
+            "(1 2.5 +)\n"          # erro 1: int + real
+            "(10 3.0 |)\n"         # erro 2: | com int
+            "(5 (1 2 +) IF)\n"     # erro 3: IF com cond não-bool
+            "(END)\n"
+        )
+        self.assertEqual(len(erros), 3)
+
+    def test_uso_de_var_indef_nao_gera_erro_em_cascata(self):
+        # X não foi declarada → erro reportado pela tabela, mas a soma
+        # ((X) 1 +) NÃO deve gerar um segundo erro de tipo.
+        ast = _ast("(START)\n((X) 1 +)\n(END)\n")
+        tabela, erros_tab = construirTabelaSimbolos(ast)
+        _, erros_tipo = verificarTipos(ast, tabela)
+        self.assertEqual(len(erros_tab), 1)
+        self.assertEqual(erros_tipo, [])
+
+
+class TestPropagacaoTabela(unittest.TestCase):
+    def test_tipo_de_mem_read_segue_tabela(self):
+        ast = _ast(
+            "(START)\n"
+            "(1.5 X)\n"
+            "((X) 2.0 +)\n"
+            "(END)\n"
+        )
+        tabela, errs_tab = construirTabelaSimbolos(ast)
+        self.assertEqual(errs_tab, [])
+        self.assertEqual(tabela.obter("X")["tipo"], TIPO_REAL)
+        ast, errs = verificarTipos(ast, tabela)
+        self.assertEqual(errs, [])
+        # ((X) 2.0 +) → real (porque X é real)
+        self.assertEqual(ast["stmts"][1]["tipo_inferido"], TIPO_REAL)
+
+    def test_mem_write_anota_tipo_indef_e_recursa_no_valor(self):
+        ast, _, erros = _check(
+            "(START)\n"
+            "(1 X)\n"
+            "(END)\n"
+        )
+        self.assertEqual(erros, [])
+        no = ast["stmts"][0]
+        self.assertEqual(no["tipo"], "mem_write")
+        # mem_write propaga o tipo do valor escrito (T-MemDef)
+        self.assertEqual(no["tipo_inferido"], TIPO_INT)
+        # e o valor interno também foi anotado
+        self.assertEqual(no["valor"]["tipo_inferido"], TIPO_INT)
+
+
+if __name__ == "__main__":
+    unittest.main()
