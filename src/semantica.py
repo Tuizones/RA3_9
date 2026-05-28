@@ -324,3 +324,117 @@ def salvarTabelaSimbolos(
     p.write_text(formatarTabelaMarkdown(tabela), encoding="utf-8")
     return p
 
+
+# --------------------------------------------------------------
+# Verificação de Tipos (Sprint 3 / §4 do guia)
+# --------------------------------------------------------------
+
+# Regras formais (cálculo de sequentes) — ver `regras_tipos.md`.
+# Sumário (Γ = ambiente da tabela de símbolos):
+#
+#   • literal sem ponto         → int
+#   • literal com ponto         → real
+#   • (e1 e2 op),  op ∈ {+,-,*,^}  exige  e1:τ, e2:τ, τ ∈ {int, real}  → τ
+#   • (e1 e2 /),  (e1 e2 %)      exige  e1:int, e2:int                  → int
+#   • (e1 e2 |)                  exige  e1:real, e2:real                → real
+#   • (e1 e2 ⊳),  ⊳ ∈ {>,<,==,!=,>=,<=}  exige  e1:τ, e2:τ, τ numérico  → bool
+#   • (cond block IF)            exige  cond:bool                       → τ(block)
+#   • (cond t e IFELSE)          exige  cond:bool ∧ τ(t) = τ(e)         → τ(t)
+#   • (cond body WHILE)          exige  cond:bool                       → unit
+#   • (v MEM)                    declara MEM:τ(v)                       (Γ' = Γ, MEM:τ(v))
+#   • (MEM)                      exige  MEM ∈ Γ                         → τ(MEM)
+#
+# Política sobre tipos numéricos: NÃO há promoção implícita int→real.
+#   `(1 2.5 +)` é erro semântico. Justificativa: o gerador ARMv7 escolhe
+#   instruções diferentes para int (ADD) e real (VADD.F64); manter os
+#   tipos disjuntos simplifica a geração de código e respeita a regra
+#   "tipo da variável fixado no momento da definição" (§2.3).
+# Tipos indefinidos (TIPO_INDEF) são tratados como "joker": não geram
+# erros em cascata (o erro original já foi reportado pela TabelaSimbolos).
+
+
+def _emitir(erros: list[ErroSemantico], msg: str, linha: int) -> None:
+    erros.append(ErroSemantico(msg, linha))
+
+
+def verificarTipos(
+    arvore: dict, tabela: TabelaSimbolos
+) -> tuple[dict, list[ErroSemantico]]:
+    """Aplica as regras de tipos sobre a AST e devolve ``(arvore, erros)``.
+
+    A árvore recebida é mutada in-place: cada nó relevante recebe a
+    chave ``tipo_inferido``. Os erros são acumulados em lista (sem
+    abortar no primeiro), seguindo o estilo de recuperação adotado em
+    todo o projeto.
+    """
+    erros: list[ErroSemantico] = []
+    if not arvore or arvore.get("tipo") != "program":
+        return arvore, erros
+
+    stmts_tipados: list[dict] = []  # contexto para resolução de (N RES)
+
+    def tipar(no) -> str:
+        if not isinstance(no, dict):
+            return TIPO_INDEF
+        t = no.get("tipo")
+        linha = no.get("linha", 0) or 0
+
+        if t == "number":
+            ti = _tipo_de_numero(no.get("valor", ""))
+        elif t == "mem_read":
+            sim = tabela.obter(no.get("nome", ""))
+            ti = sim["tipo"] if sim else TIPO_INDEF
+        elif t == "res_ref":
+            # Tipo de (N RES) = tipo do statement N posições antes do atual.
+            n = no.get("linhas_atras", 0) or 0
+            if 1 <= n <= len(stmts_tipados):
+                ti = stmts_tipados[-n].get("tipo_inferido", TIPO_INDEF)
+            else:
+                ti = TIPO_INDEF
+        elif t == "mem_write":
+            # mem_write propaga o tipo do valor escrito (T-MemDef/T-MemSet).
+            ti = tipar(no.get("valor"))
+        elif t == "binary":
+            ti = _tipar_binario(no, tipar, erros)
+        elif t == "if":
+            tc = tipar(no.get("cond"))
+            tb = tipar(no.get("then_block"))
+            if tc not in (TIPO_BOOL, TIPO_INDEF):
+                _emitir(erros, f"condição do IF deve ser 'bool', recebeu '{tc}'", linha)
+            ti = tb
+        elif t == "ifelse":
+            tc = tipar(no.get("cond"))
+            tt = tipar(no.get("then_block"))
+            te = tipar(no.get("else_block"))
+            if tc not in (TIPO_BOOL, TIPO_INDEF):
+                _emitir(erros, f"condição do IFELSE deve ser 'bool', recebeu '{tc}'", linha)
+            if tt == te:
+                ti = tt
+            elif TIPO_INDEF in (tt, te):
+                ti = tt if tt != TIPO_INDEF else te
+            else:
+                _emitir(
+                    erros,
+                    f"ramos do IFELSE têm tipos divergentes: 'then':{tt} vs 'else':{te}",
+                    linha,
+                )
+                ti = TIPO_INDEF
+        elif t == "while":
+            tc = tipar(no.get("cond"))
+            tipar(no.get("body"))
+            if tc not in (TIPO_BOOL, TIPO_INDEF):
+                _emitir(erros, f"condição do WHILE deve ser 'bool', recebeu '{tc}'", linha)
+            ti = TIPO_INDEF
+        else:
+            ti = TIPO_INDEF
+
+        no["tipo_inferido"] = ti
+        return ti
+
+    for stmt in arvore.get("stmts", []):
+        tipar(stmt)
+        stmts_tipados.append(stmt)
+    return arvore, erros
+
+
+def _tipar_binario(no: dict, tipar, erros: list[ErroSemantico]) -> str:
