@@ -1,0 +1,467 @@
+{
+  "tipo": "program",
+  "stmts": [
+    {
+      "tipo": "binary",
+      "op": "+",
+      "esq": {
+        "tipo": "number",
+        "valor": "10",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "3",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 8,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "op": "+",
+        "instrucao_sugerida": "ADD"
+      }
+    },
+    {
+      "tipo": "binary",
+      "op": "-",
+      "esq": {
+        "tipo": "number",
+        "valor": "8",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "3",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 10,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "op": "-",
+        "instrucao_sugerida": "SUB"
+      }
+    },
+    {
+      "tipo": "binary",
+      "op": "*",
+      "esq": {
+        "tipo": "number",
+        "valor": "4",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "3",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 12,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "op": "*",
+        "instrucao_sugerida": "MUL"
+      }
+    },
+    {
+      "tipo": "binary",
+      "op": "/",
+      "esq": {
+        "tipo": "number",
+        "valor": "10",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "2",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 14,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "op": "/",
+        "instrucao_sugerida": "BL __op_idiv"
+      }
+    },
+    {
+      "tipo": "binary",
+      "op": "%",
+      "esq": {
+        "tipo": "number",
+        "valor": "10",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "3",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 16,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "op": "%",
+        "instrucao_sugerida": "BL __op_mod"
+      }
+    },
+    {
+      "tipo": "binary",
+      "op": "^",
+      "esq": {
+        "tipo": "number",
+        "valor": "2",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "5",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 18,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "op": "^",
+        "instrucao_sugerida": "BL __op_pow"
+      }
+    },
+    {
+      "tipo": "binary",
+      "op": "|",
+      "esq": {
+        "tipo": "number",
+        "valor": "7.5",
+        "tipo_inferido": "real",
+        "meta_asm": {
+          "registrador": "D0",
+          "tipo": "real"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "2.5",
+        "tipo_inferido": "real",
+        "meta_asm": {
+          "registrador": "D0",
+          "tipo": "real"
+        }
+      },
+      "linha": 20,
+      "tipo_inferido": "real",
+      "meta_asm": {
+        "registrador": "D0",
+        "tipo": "real",
+        "op": "|",
+        "instrucao_sugerida": "VDIV.F64"
+      }
+    },
+    {
+      "tipo": "mem_write",
+      "nome": "CONT",
+      "valor": {
+        "tipo": "number",
+        "valor": "5",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 22,
+      "tipo_inferido": "int",
+      "simbolo_ref": {
+        "nome": "CONT",
+        "tipo": "int",
+        "linha_def": 22,
+        "escopo": "global"
+      },
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "mem_label": "mem_cont"
+      }
+    },
+    {
+      "tipo": "binary",
+      "op": "*",
+      "esq": {
+        "tipo": "mem_read",
+        "nome": "CONT",
+        "linha": 24,
+        "tipo_inferido": "int",
+        "simbolo_ref": {
+          "nome": "CONT",
+          "tipo": "int",
+          "linha_def": 22,
+          "escopo": "global"
+        },
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int",
+          "mem_label": "mem_cont"
+        }
+      },
+      "dir": {
+        "tipo": "number",
+        "valor": "2",
+        "tipo_inferido": "int",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int"
+        }
+      },
+      "linha": 24,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "op": "*",
+        "instrucao_sugerida": "MUL"
+      }
+    },
+    {
+      "tipo": "res_ref",
+      "linhas_atras": 1,
+      "linha": 26,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int"
+      }
+    },
+    {
+      "tipo": "while",
+      "cond": {
+        "tipo": "binary",
+        "op": ">",
+        "esq": {
+          "tipo": "mem_read",
+          "nome": "CONT",
+          "linha": 28,
+          "tipo_inferido": "int",
+          "simbolo_ref": {
+            "nome": "CONT",
+            "tipo": "int",
+            "linha_def": 22,
+            "escopo": "global"
+          },
+          "meta_asm": {
+            "registrador": "R0",
+            "tipo": "int",
+            "mem_label": "mem_cont"
+          }
+        },
+        "dir": {
+          "tipo": "number",
+          "valor": "0",
+          "tipo_inferido": "int",
+          "meta_asm": {
+            "registrador": "R0",
+            "tipo": "int"
+          }
+        },
+        "linha": 28,
+        "tipo_inferido": "bool",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "bool",
+          "op": ">",
+          "instrucao_sugerida": "CMP+MOV"
+        }
+      },
+      "body": {
+        "tipo": "mem_write",
+        "nome": "CONT",
+        "valor": {
+          "tipo": "binary",
+          "op": "-",
+          "esq": {
+            "tipo": "mem_read",
+            "nome": "CONT",
+            "linha": 28,
+            "tipo_inferido": "int",
+            "simbolo_ref": {
+              "nome": "CONT",
+              "tipo": "int",
+              "linha_def": 22,
+              "escopo": "global"
+            },
+            "meta_asm": {
+              "registrador": "R0",
+              "tipo": "int",
+              "mem_label": "mem_cont"
+            }
+          },
+          "dir": {
+            "tipo": "number",
+            "valor": "1",
+            "tipo_inferido": "int",
+            "meta_asm": {
+              "registrador": "R0",
+              "tipo": "int"
+            }
+          },
+          "linha": 28,
+          "tipo_inferido": "int",
+          "meta_asm": {
+            "registrador": "R0",
+            "tipo": "int",
+            "op": "-",
+            "instrucao_sugerida": "SUB"
+          }
+        },
+        "linha": 28,
+        "tipo_inferido": "int",
+        "simbolo_ref": {
+          "nome": "CONT",
+          "tipo": "int",
+          "linha_def": 22,
+          "escopo": "global"
+        },
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int",
+          "mem_label": "mem_cont"
+        }
+      },
+      "linha": 28,
+      "tipo_inferido": "indef",
+      "meta_asm": {
+        "registrador": "D0",
+        "tipo": "indef",
+        "label_inicio": "L_while_i_1",
+        "label_fim": "L_while_f_2"
+      }
+    },
+    {
+      "tipo": "if",
+      "cond": {
+        "tipo": "binary",
+        "op": "==",
+        "esq": {
+          "tipo": "mem_read",
+          "nome": "CONT",
+          "linha": 30,
+          "tipo_inferido": "int",
+          "simbolo_ref": {
+            "nome": "CONT",
+            "tipo": "int",
+            "linha_def": 22,
+            "escopo": "global"
+          },
+          "meta_asm": {
+            "registrador": "R0",
+            "tipo": "int",
+            "mem_label": "mem_cont"
+          }
+        },
+        "dir": {
+          "tipo": "number",
+          "valor": "0",
+          "tipo_inferido": "int",
+          "meta_asm": {
+            "registrador": "R0",
+            "tipo": "int"
+          }
+        },
+        "linha": 30,
+        "tipo_inferido": "bool",
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "bool",
+          "op": "==",
+          "instrucao_sugerida": "CMP+MOV"
+        }
+      },
+      "then_block": {
+        "tipo": "mem_write",
+        "nome": "RESULT",
+        "valor": {
+          "tipo": "number",
+          "valor": "42",
+          "tipo_inferido": "int",
+          "meta_asm": {
+            "registrador": "R0",
+            "tipo": "int"
+          }
+        },
+        "linha": 30,
+        "tipo_inferido": "int",
+        "simbolo_ref": {
+          "nome": "RESULT",
+          "tipo": "int",
+          "linha_def": 30,
+          "escopo": "global"
+        },
+        "meta_asm": {
+          "registrador": "R0",
+          "tipo": "int",
+          "mem_label": "mem_result"
+        }
+      },
+      "linha": 30,
+      "tipo_inferido": "int",
+      "meta_asm": {
+        "registrador": "R0",
+        "tipo": "int",
+        "label_fim": "L_if_fim_3"
+      }
+    }
+  ]
+}
