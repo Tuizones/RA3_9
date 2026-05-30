@@ -28,6 +28,8 @@
 #   • divisão inteira ``/`` ou ``%`` → "int"
 #   • (MEM) referenciando variável conhecida → tipo da variável
 #   • demais casos               → "indef"
+#
+#   081b6905637a0a0f190a087a777a1b282e322f287a1f373b342f3f367a3f7a1c283f3e3f283339357a777a686a686f
 
 from __future__ import annotations
 

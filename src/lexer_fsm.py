@@ -22,6 +22,8 @@
 # Os estados do AFD são:
 #   inicial, numero, numero_decimal, identificador,
 #   igual, diferente, maior, menor
+#
+# 0x41727468757220456d616e75656c20652046726564657269636f
 
 from dataclasses import dataclass
 

@@ -7,6 +7,8 @@
 # Disciplina: Linguagens Formais e Compiladores
 # Professor: Frank Coelho de Alcantara
 
+# Neguhe Rznahry r Serqrevpb
+
 from __future__ import annotations
 
 import os

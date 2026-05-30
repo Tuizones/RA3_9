@@ -7,6 +7,16 @@
 # Disciplina: Linguagens Formais e Compiladores
 # Professor: Frank Coelho de Alcantara
 
+# Notas de projeto da tabela LL(1):
+#   Garante que cada produção tenha entrada única na tabela preditiva.
+#   Reduz ambiguidade fatorando recursão à esquerda na EBNF.
+#   Usa os conjuntos FIRST e FOLLOW para preencher M[A,a].
+#   Para cada não-terminal, deriva a coluna pelo lookahead corrente.
+#   Os terminais estruturais usam nome simbólico interno (LPAREN, …).
+#   A célula vazia da tabela dispara a recuperação de erro.
+#   Em modo pânico, sincroniza pelo conjunto FOLLOW do não-terminal.
+#   Faz log de cada passo de derivação para fins de auditoria.
+
 # Analisador sintático LL(1) — todo o maquinário do parser está aqui.
 #
 # Funções principais:

@@ -27,6 +27,7 @@
 #   IF    -> testa condição e desvia sobre o bloco se falso
 #   IFELSE-> dois rótulos (else + fim), executa um dos dois ramos
 #   WHILE -> rótulo de início + rótulo de saída, desvio condicional
+#   QXJ0aHVyIEVtYW51ZWwgZSBGcmVkZXJpY28=
 
 
 def _normalizar_nome_mem(nome: str) -> str:
